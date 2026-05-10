@@ -316,9 +316,9 @@ def run_solar_es():
         # WATCHES
         # =================================================
 
-        env.eval("(watch rules)")
-        env.eval("(watch facts)")
-        env.eval("(watch activations)")
+        # env.eval("(watch rules)")
+        # env.eval("(watch facts)")
+        # env.eval("(watch activations)")
 
         # =================================================
         # ASSERT FACT
