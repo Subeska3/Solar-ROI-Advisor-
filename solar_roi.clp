@@ -1,314 +1,700 @@
-;;; ==========================================================
-;;; SOLAR PANEL ROI ADVISOR FOR SRI LANKA
-;;; Author: Mohanras.A.S.A | MSc AI Assignment
-;;; ==========================================================
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; SOLAR ROI EXPERT SYSTEM — FINAL VERSION
+;; Author: Mohanras.A.S.A
+;; MSc AI Assignment
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TEMPLATES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (deftemplate household
+
    (slot id)
-   (slot monthly-bill-lkr)
+
+   ;; USER PROVIDED MONTHLY USAGE
    (slot monthly-units)
+
+   ;; LOCATION
    (slot district)
+
+   ;; ROOF DETAILS
    (slot roof-area-sqm)
    (slot roof-orientation)
    (slot roof-shading)
+
+   ;; FINANCIALS
    (slot budget-lkr)
-   (slot loan-eligible))
+   (slot loan-eligible)
 
-(deftemplate tariff-slab
-   (slot label)
-   (slot min-units)
-   (slot max-units)
-   (slot rate-per-unit))
+   ;; APPLIANCES
+   (slot num-ac)
+   (slot has-ev)
+   (slot has-water-heater)
 
-(deftemplate district-sun
-   (slot district)
-   (slot peak-sun-hours)
-   (slot zone))
+   ;; BATTERY / POWER
+   (slot power-cut-frequency)
+   (slot battery-preference)
 
-(deftemplate finance-option
-   (slot scheme)
-   (slot interest-rate)
-   (slot tenure-years))
+   ;; CONSUMPTION PATTERN
+   (slot time-usage)
 
-(deftemplate analysis
-   (slot household-id)
-   (slot avg-tariff (default 0))
-   (slot recommended-kw (default 0))
-   (slot generation-units (default 0))
-   (slot system-cost-lkr (default 0))
-   (slot scheme (default none))
-   (slot payback-years (default 0))
-   (slot reason (default "pending")))
+   ;; USER GOAL
+   (slot user-priority)
 
-(deffacts ceb-tariff-slabs
-   (tariff-slab (label slab-1) (min-units 0)   (max-units 60)   (rate-per-unit 12))
-   (tariff-slab (label slab-2) (min-units 61)  (max-units 90)   (rate-per-unit 30))
-   (tariff-slab (label slab-3) (min-units 91)  (max-units 120)  (rate-per-unit 37))
-   (tariff-slab (label slab-4) (min-units 121) (max-units 180)  (rate-per-unit 48))
-   (tariff-slab (label slab-5) (min-units 181) (max-units 9999) (rate-per-unit 75)))
+   ;; PANEL PREFERENCE
+   (slot panel-type)
 
-(deffacts district-sun-data
-   (district-sun (district hambantota)   (peak-sun-hours 5.6) (zone dry))
-   (district-sun (district anuradhapura) (peak-sun-hours 5.5) (zone dry))
-   (district-sun (district jaffna)       (peak-sun-hours 5.7) (zone dry))
-   (district-sun (district trincomalee)  (peak-sun-hours 5.5) (zone dry))
-   (district-sun (district polonnaruwa)  (peak-sun-hours 5.4) (zone dry))
-   (district-sun (district kurunegala)   (peak-sun-hours 5.0) (zone intermediate))
-   (district-sun (district colombo)      (peak-sun-hours 4.8) (zone wet))
-   (district-sun (district gampaha)      (peak-sun-hours 4.7) (zone wet))
-   (district-sun (district galle)        (peak-sun-hours 4.7) (zone wet))
-   (district-sun (district matara)       (peak-sun-hours 4.8) (zone wet))
-   (district-sun (district kandy)        (peak-sun-hours 4.2) (zone intermediate))
-   (district-sun (district nuwara-eliya) (peak-sun-hours 4.0) (zone hill)))
+   ;; FUTURE EXPANSION
+   (slot future-expansion)
+)
 
-(deffacts finance-options
-   (finance-option (scheme cash)      (interest-rate 0)  (tenure-years 0))
-   (finance-option (scheme ceb-loan)  (interest-rate 9)  (tenure-years 7))
-   (finance-option (scheme bank-loan) (interest-rate 14) (tenure-years 5)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defrule estimate-monthly-units
+(deftemplate consumer-profile
+
+   (slot type)
+   (slot avg-tariff)
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftemplate solar-recommendation
+
+   (slot system-size-kw)
+   (slot estimated-cost)
+   (slot expected-generation)
+   (slot confidence)
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftemplate scheme
+
+   (slot type)
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; INPUT VALIDATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule missing-monthly-units
+
    (declare (salience 100))
-   ?h <- (household (id ?id) (monthly-bill-lkr ?bill) (monthly-units 0))
+
+   (household
+      (monthly-units 0)
+   )
+
    =>
-   (bind ?est-units (round (/ ?bill 45)))
-   (modify ?h (monthly-units ?est-units))
-   (printout t "  >> Estimated consumption: " ?est-units " units/month" crlf))
+
+   (printout t
+      "[ERROR] Monthly electricity usage missing."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule missing-roof-area
+
+   (declare (salience 100))
+
+   (household
+      (roof-area-sqm 0)
+   )
+
+   =>
+
+   (printout t
+      "[ERROR] Roof area missing."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule missing-budget
+
+   (declare (salience 100))
+
+   (household
+      (budget-lkr 0)
+   )
+
+   =>
+
+   (printout t
+      "[ERROR] Budget information missing."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; CONSUMER CLASSIFICATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule classify-low-consumer
+
    (declare (salience 90))
-   (household (id ?id) (monthly-units ?u))
-   (test (<= ?u 90))
+
+   (household
+      (monthly-units ?u&:(<= ?u 90))
+   )
+
    =>
-   (assert (analysis (household-id ?id) (avg-tariff 20)))
-   (printout t "  >> Low-consumption household, avg ~LKR 20/unit" crlf))
+
+   (assert
+
+      (consumer-profile
+         (type low)
+         (avg-tariff 20)
+      )
+   )
+
+   (printout t
+      "[RULE] classify-low-consumer fired"
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule classify-mid-consumer
+
    (declare (salience 90))
-   (household (id ?id) (monthly-units ?u))
-   (test (and (> ?u 90) (<= ?u 180)))
+
+   (household
+      (monthly-units ?u&:(and (> ?u 90) (<= ?u 180)))
+   )
+
    =>
-   (assert (analysis (household-id ?id) (avg-tariff 42)))
-   (printout t "  >> Mid-consumption household, avg ~LKR 42/unit" crlf))
+
+   (assert
+
+      (consumer-profile
+         (type medium)
+         (avg-tariff 42)
+      )
+   )
+
+   (printout t
+      "[RULE] classify-mid-consumer fired"
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule classify-high-consumer
+
    (declare (salience 90))
-   (household (id ?id) (monthly-units ?u))
-   (test (> ?u 180))
+
+   (household
+      (monthly-units ?u&:(> ?u 180))
+   )
+
    =>
-   (assert (analysis (household-id ?id) (avg-tariff 60)))
-   (printout t "  >> HIGH-consumption household, avg ~LKR 60/unit (best ROI candidate!)" crlf))
+
+   (assert
+
+      (consumer-profile
+         (type high)
+         (avg-tariff 60)
+      )
+   )
+
+   (printout t
+      "[RULE] classify-high-consumer fired"
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; SOLAR SYSTEM SIZE RECOMMENDATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule recommend-system-size
+
    (declare (salience 80))
-   (household (id ?id) (monthly-units ?u) (district ?d))
-   (district-sun (district ?d) (peak-sun-hours ?psh))
-   ?a <- (analysis (household-id ?id) (recommended-kw 0))
-   =>
-   (bind ?gen-per-kw (* ?psh 30 0.75))
-   (bind ?required-kw (/ ?u ?gen-per-kw))
-   (bind ?rec-kw (/ (round (* ?required-kw 2)) 2.0))
-   (if (< ?rec-kw ?required-kw) then (bind ?rec-kw (+ ?rec-kw 0.5)))
-   (bind ?gen-units (* ?rec-kw ?gen-per-kw))
-   (bind ?cost (* ?rec-kw 220000))
-   (modify ?a (recommended-kw ?rec-kw)
-              (generation-units ?gen-units)
-              (system-cost-lkr ?cost))
-   (printout t "  >> Recommended size: " ?rec-kw " kW" crlf)
-   (printout t "  >> Expected generation: " (round ?gen-units) " units/month" crlf)
-   (printout t "  >> System cost: LKR " ?cost crlf))
 
-(defrule warn-insufficient-roof
-   (declare (salience 70))
-   (household (id ?id) (roof-area-sqm ?roof))
-   (analysis (household-id ?id) (recommended-kw ?kw))
-   (test (> ?kw 0))
-   (test (< ?roof (* ?kw 10)))
-   =>
-   (printout t "[!] WARNING: Roof area (" ?roof " sqm) insufficient for "
-             ?kw " kW system. Need at least " (* ?kw 10) " sqm." crlf)
-   (printout t "    Consider downsizing or partial coverage." crlf))
+   (household
 
-(defrule warn-shading
-   (declare (salience 70))
-   (household (id ?id) (roof-shading heavy))
-   =>
-   (printout t "[!] Heavy roof shading detected - generation may drop 30-50 percent." crlf)
-   (printout t "    Trim trees or relocate panels before installation." crlf))
+      (monthly-units ?units)
+      (roof-shading ?shade)
+      (roof-orientation ?orientation)
+      (panel-type ?panel)
+   )
 
-(defrule warn-orientation
-   (declare (salience 70))
-   (household (id ?id) (roof-orientation north))
    =>
-   (printout t "[!] North-facing roof has 15-20 percent lower yield in Sri Lanka." crlf)
-   (printout t "    Consider tilted mounting frames to face south." crlf))
+
+   ;; BASE GENERATION
+   (bind ?generation-per-kw 120)
+
+   ;; SHADING ADJUSTMENT
+   (if (eq ?shade heavy)
+      then
+      (bind ?generation-per-kw 90)
+   )
+
+   (if (eq ?shade partial)
+      then
+      (bind ?generation-per-kw 105)
+   )
+
+   ;; ORIENTATION ADJUSTMENT
+   (if (eq ?orientation north)
+      then
+      (bind ?generation-per-kw (- ?generation-per-kw 10))
+   )
+
+   ;; PANEL TYPE BONUS
+   (if (eq ?panel topcon)
+      then
+      (bind ?generation-per-kw (+ ?generation-per-kw 10))
+   )
+
+   (if (eq ?panel bifacial)
+      then
+      (bind ?generation-per-kw (+ ?generation-per-kw 15))
+   )
+
+   ;; REQUIRED SYSTEM SIZE
+   (bind ?required-kw (/ ?units ?generation-per-kw))
+
+   ;; COST ESTIMATION
+   (bind ?cost (* ?required-kw 180000))
+
+   ;; EXPECTED GENERATION
+   (bind ?generation (* ?required-kw ?generation-per-kw))
+
+   ;; CONFIDENCE
+   (bind ?confidence 0.88)
+
+   ;; BETTER CONFIDENCE FOR GOOD ROOF
+   (if (and
+         (eq ?shade none)
+         (neq ?orientation north))
+      then
+      (bind ?confidence 0.95)
+   )
+
+   (assert
+
+      (solar-recommendation
+
+         (system-size-kw ?required-kw)
+         (estimated-cost ?cost)
+         (expected-generation ?generation)
+         (confidence ?confidence)
+      )
+   )
+
+   (printout t
+      "[RULE] recommend-system-size fired"
+      crlf
+   )
+
+   (printout t
+      "Recommended System Size = "
+      ?required-kw
+      " kW"
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ROOF VALIDATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule warn-heavy-shading
+
+   (declare (salience 70))
+
+   (household
+      (roof-shading heavy)
+   )
+
+   =>
+
+   (printout t
+      "[WARNING] Heavy roof shading detected."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule warn-north-orientation
+
+   (declare (salience 70))
+
+   (household
+      (roof-orientation north)
+   )
+
+   =>
+
+   (printout t
+      "[WARNING] North-facing roof reduces efficiency."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule confirm-good-roof
+
    (declare (salience 70))
-   (household (id ?id) (roof-area-sqm ?roof) (roof-shading none) (roof-orientation ?o))
-   (analysis (household-id ?id) (recommended-kw ?kw))
-   (test (> ?kw 0))
-   (test (>= ?roof (* ?kw 10)))
-   (test (or (eq ?o south) (eq ?o east-west)))
+
+   (household
+      (roof-shading none)
+      (roof-orientation south)
+   )
+
    =>
-   (printout t "[OK] Roof is suitable for full installation." crlf))
+
+   (printout t
+      "[INFO] Roof conditions are ideal."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; BATTERY RECOMMENDATIONS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule recommend-battery
+
+   (declare (salience 65))
+
+   (household
+
+      (battery-preference yes)
+   )
+
+   =>
+
+   (printout t
+      "[INFO] Hybrid inverter + battery backup recommended."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule frequent-power-cuts
+
+   (declare (salience 65))
+
+   (household
+
+      (power-cut-frequency frequent)
+   )
+
+   =>
+
+   (printout t
+      "[INFO] Frequent power cuts detected."
+      crlf
+   )
+
+   (printout t
+      "[INFO] Battery storage highly recommended."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ELECTRIC VEHICLE ANALYSIS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule detect-ev-load
+
+   (declare (salience 60))
+
+   (household
+      (has-ev yes)
+   )
+
+   =>
+
+   (printout t
+      "[INFO] EV charging increases future electricity demand."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; FUTURE EXPANSION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule future-expansion-advice
+
+   (declare (salience 60))
+
+   (household
+      (future-expansion yes)
+   )
+
+   =>
+
+   (printout t
+      "[INFO] Design system with expansion capability."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; SCHEME RECOMMENDATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule recommend-net-metering
-   (declare (salience 60))
-   (household (id ?id) (monthly-units ?u))
-   ?a <- (analysis (household-id ?id) (generation-units ?g) (scheme none))
-   (test (> ?g 0))
-   (test (and (>= ?g (* ?u 0.85)) (<= ?g (* ?u 1.15))))
+
+   (declare (salience 50))
+
+   (solar-recommendation
+      (system-size-kw ?kw&:(<= ?kw 5))
+   )
+
    =>
-   (modify ?a (scheme net-metering)
-              (reason "Generation matches consumption - bank credits via Net Metering"))
-   (printout t "  >> SCHEME: Net Metering (generation ~ consumption)" crlf))
+
+   (assert
+
+      (scheme
+         (type net-metering)
+      )
+   )
+
+   (printout t
+      "[RULE] recommend-net-metering fired"
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule recommend-net-accounting
-   (declare (salience 60))
-   (household (id ?id) (monthly-units ?u))
-   ?a <- (analysis (household-id ?id) (generation-units ?g) (scheme none))
-   (test (> ?g (* ?u 1.15)))
-   (test (<= ?g (* ?u 1.5)))
-   =>
-   (modify ?a (scheme net-accounting)
-              (reason "Surplus generation - get cash payout via Net Accounting"))
-   (printout t "  >> SCHEME: Net Accounting (cash for surplus)" crlf))
 
-(defrule recommend-net-plus
-   (declare (salience 60))
-   (household (id ?id) (monthly-units ?u))
-   ?a <- (analysis (household-id ?id) (generation-units ?g) (scheme none))
-   (test (> ?g (* ?u 1.5)))
-   =>
-   (modify ?a (scheme net-plus)
-              (reason "Large surplus - sell all generation as income via Net Plus"))
-   (printout t "  >> SCHEME: Net Plus (treat as income-generating asset)" crlf))
+   (declare (salience 50))
 
-(defrule recommend-net-metering-undersized
-   (declare (salience 60))
-   (household (id ?id) (monthly-units ?u))
-   ?a <- (analysis (household-id ?id) (generation-units ?g) (scheme none))
-   (test (> ?g 0))
-   (test (< ?g (* ?u 0.85)))
+   (solar-recommendation
+      (system-size-kw ?kw&:(> ?kw 5))
+   )
+
    =>
-   (modify ?a (scheme net-metering)
-              (reason "Partial coverage - Net Metering reduces bill"))
-   (printout t "  >> SCHEME: Net Metering (system covers part of usage)" crlf))
+
+   (assert
+
+      (scheme
+         (type net-accounting)
+      )
+   )
+
+   (printout t
+      "[RULE] recommend-net-accounting fired"
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; FINANCIAL ALTERNATIVES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule suggest-phased-installation
+
+   (declare (salience 40))
+
+   (solar-recommendation
+      (estimated-cost ?cost)
+   )
+
+   (household
+      (budget-lkr ?budget)
+   )
+
+   (test (< ?budget ?cost))
+
+   =>
+
+   (printout t
+      "[ALTERNATIVE] Budget lower than estimated cost."
+      crlf
+   )
+
+   (printout t
+      "[ALTERNATIVE] Consider phased installation."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule suggest-bank-loan
+
+   (declare (salience 40))
+
+   (household
+      (loan-eligible yes)
+   )
+
+   =>
+
+   (printout t
+      "[ALTERNATIVE] Green energy loan available."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; PAYBACK CALCULATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrule calculate-payback
-   (declare (salience 50))
-   ?a <- (analysis (household-id ?id)
-                   (avg-tariff ?rate)
-                   (generation-units ?g)
-                   (system-cost-lkr ?cost)
-                   (payback-years 0))
-   (test (> ?cost 0))
+
+   (declare (salience 30))
+
+   (solar-recommendation
+
+      (estimated-cost ?cost)
+      (system-size-kw ?kw)
+   )
+
    =>
-   (bind ?monthly-savings (* ?g ?rate))
-   (bind ?annual-savings (* ?monthly-savings 12))
+
+   ;; APPROXIMATE ANNUAL SAVINGS
+   (bind ?annual-savings (* ?kw 90000))
+
+   ;; PAYBACK
    (bind ?payback (/ ?cost ?annual-savings))
-   (modify ?a (payback-years ?payback))
-   (printout t "  >> Monthly savings: LKR " (round ?monthly-savings) crlf)
-   (printout t "  >> Payback period: " (round ?payback) " years" crlf))
 
-(defrule advise-cash-purchase
-   (declare (salience 40))
-   (household (id ?id) (budget-lkr ?budget))
-   (analysis (household-id ?id) (system-cost-lkr ?cost))
-   (test (> ?cost 0))
-   (test (>= ?budget ?cost))
-   =>
-   (printout t crlf "[FIN] FINANCING: Cash purchase recommended" crlf)
-   (printout t "      Best ROI - no interest cost." crlf))
+   (printout t
+      "[RULE] calculate-payback fired"
+      crlf
+   )
 
-(defrule advise-ceb-loan
-   (declare (salience 40))
-   (household (id ?id) (budget-lkr ?budget) (loan-eligible yes))
-   (analysis (household-id ?id) (system-cost-lkr ?cost))
-   (test (> ?cost 0))
-   (test (< ?budget ?cost))
-   =>
-   (bind ?gap (- ?cost ?budget))
-   (printout t crlf "[FIN] FINANCING: Apply for CEB rooftop financing scheme" crlf)
-   (printout t "      Funding gap: LKR " ?gap " (~9 percent interest, 7 yr tenure)" crlf)
-   (printout t "      Monthly EMI offset by solar savings." crlf))
+   (printout t
+      "Estimated Annual Savings = LKR "
+      ?annual-savings
+      crlf
+   )
 
-(defrule advise-bank-loan
-   (declare (salience 35))
-   (household (id ?id) (budget-lkr ?budget) (loan-eligible yes))
-   (analysis (household-id ?id) (system-cost-lkr ?cost))
-   (test (> ?cost 0))
-   (test (< ?budget ?cost))
-   =>
-   (printout t "[FIN] ALT FINANCING: Bank green loan (BOC/Sampath/HNB)" crlf)
-   (printout t "      ~14 percent interest, 5 yr tenure - higher EMI but faster payoff" crlf))
+   (printout t
+      "Estimated Payback Period = "
+      ?payback
+      " years"
+      crlf
+   )
+)
 
-(defrule advise-no-loan
-   (declare (salience 40))
-   (household (id ?id) (budget-lkr ?budget) (loan-eligible no))
-   (analysis (household-id ?id) (system-cost-lkr ?cost))
-   (test (> ?cost 0))
-   (test (< ?budget ?cost))
-   =>
-   (bind ?affordable-kw (/ ?budget 220000))
-   (bind ?affordable-kw (/ (round (* ?affordable-kw 2)) 2.0))
-   (printout t crlf "[FIN] FINANCING: Phased installation recommended" crlf)
-   (printout t "      Start with " ?affordable-kw " kW within budget; expand later." crlf))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DISTRICT ADVISORY
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defrule advisory-low-consumer-warning
-   (declare (salience 30))
-   (household (id ?id) (monthly-units ?u))
-   (test (<= ?u 90))
-   =>
-   (printout t crlf "[!] NOTE: Your consumption is low (subsidised slabs)." crlf)
-   (printout t "    Solar payback will be slower than for high-bill households." crlf)
-   (printout t "    Net Plus scheme may be more attractive than self-use." crlf))
+(defrule advisory-dry-zone
 
-(defrule advisory-high-consumer-encourage
-   (declare (salience 30))
-   (household (id ?id) (monthly-units ?u))
-   (analysis (household-id ?id) (payback-years ?p))
-   (test (> ?u 180))
-   (test (> ?p 0))
-   (test (< ?p 5))
-   =>
-   (printout t crlf "[$$] EXCELLENT ROI: High tariff slab + good payback." crlf)
-   (printout t "     Solar is a strong investment for your household." crlf))
+   (declare (salience 20))
 
-(defrule advisory-dry-zone-bonus
-   (declare (salience 30))
-   (household (id ?id) (district ?d))
-   (district-sun (district ?d) (zone dry))
-   =>
-   (printout t crlf "[SUN] Dry zone advantage: high sun hours = better generation." crlf))
+   (household
+      (district ?d)
+   )
 
-(defrule advisory-hill-country-warning
-   (declare (salience 30))
-   (household (id ?id) (district ?d))
-   (district-sun (district ?d) (zone hill))
-   =>
-   (printout t crlf "[CLOUD] Hill country: lower sun hours, longer payback." crlf)
-   (printout t "        Consider higher-efficiency panels (mono-PERC, TOPCon)." crlf))
+   (test
 
-(defrule print-summary
-   (declare (salience 1))
-   (analysis (household-id ?id)
-             (recommended-kw ?kw)
-             (generation-units ?g)
-             (system-cost-lkr ?cost)
-             (scheme ?s)
-             (payback-years ?p)
-             (reason ?r))
-   (test (> ?kw 0))
+      (or
+
+         (eq ?d anuradhapura)
+         (eq ?d polonnaruwa)
+         (eq ?d hambantota)
+      )
+   )
+
    =>
-   (printout t crlf
-             "=================================================" crlf
-             "          SOLAR INSTALLATION RECOMMENDATION       " crlf
-             "=================================================" crlf
-             "  System size:    " ?kw " kW" crlf
-             "  Generation:     " (round ?g) " units/month" crlf
-             "  System cost:    LKR " ?cost crlf
-             "  Best scheme:    " ?s crlf
-             "  Payback period: " (round ?p) " years" crlf
-             "  Rationale:      " ?r crlf
-             "=================================================" crlf))
+
+   (printout t
+      "[INFO] High solar irradiance district detected."
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; FINAL SUMMARY
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrule final-summary
+
+   (declare (salience -100))
+
+   (solar-recommendation
+
+      (system-size-kw ?kw)
+      (estimated-cost ?cost)
+      (expected-generation ?gen)
+      (confidence ?conf)
+   )
+
+   (scheme
+      (type ?scheme)
+   )
+
+   =>
+
+   (printout t crlf)
+
+   (printout t
+      "===================================="
+      crlf
+   )
+
+   (printout t
+      "FINAL SOLAR RECOMMENDATION"
+      crlf
+   )
+
+   (printout t
+      "===================================="
+      crlf
+   )
+
+   (printout t
+      "Recommended System Size : "
+      ?kw
+      " kW"
+      crlf
+   )
+
+   (printout t
+      "Estimated System Cost   : LKR "
+      ?cost
+      crlf
+   )
+
+   (printout t
+      "Expected Monthly Output : "
+      ?gen
+      " units"
+      crlf
+   )
+
+   (printout t
+      "Recommended Scheme      : "
+      ?scheme
+      crlf
+   )
+
+   (printout t
+      "Confidence Score        : "
+      (* ?conf 100)
+      "%"
+      crlf
+   )
+
+   (printout t
+      "===================================="
+      crlf
+   )
+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; END OF FILE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
